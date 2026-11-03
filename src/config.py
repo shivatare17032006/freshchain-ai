@@ -99,16 +99,23 @@ class LLMSettings:
     timeout: float
 
     @property
+    def is_local(self) -> bool:
+        return any(h in self.base_url for h in ("://localhost", "://127.0.0.1", "://[::1]"))
+
+    @property
     def enabled(self) -> bool:
-        return self.provider != "none" and bool(self.api_key)
+        return self.provider != "none" and (bool(self.api_key) or (self.provider == "openai_compatible" and self.is_local))
 
 
 def llm_settings() -> LLMSettings:
     """Read LLM settings at call time so they can change without restarting."""
+    provider = os.environ.get("LLM_PROVIDER", "none").strip().lower() or "none"
+    default_url = "https://api.anthropic.com" if provider == "anthropic" else "https://api.openai.com/v1"
+    default_model = "claude-sonnet-5-5" if provider == "anthropic" else ""
     return LLMSettings(
-        provider=os.environ.get("LLM_PROVIDER", "none").strip().lower() or "none",
+        provider=provider,
         api_key=os.environ.get("LLM_API_KEY", "").strip(),
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
-        model=os.environ.get("LLM_MODEL", "").strip(),
+        base_url=(os.environ.get("LLM_BASE_URL", "").strip() or default_url).rstrip("/"),
+        model=os.environ.get("LLM_MODEL", "").strip() or default_model,
         timeout=float(os.environ.get("LLM_TIMEOUT_SECONDS", "20")),
     )

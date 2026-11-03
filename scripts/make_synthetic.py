@@ -1,25 +1,20 @@
-"""Create SYNTHETIC smoke-test data so the app can be exercised without downloading anything.
-The processed table is flagged synthetic=True and the UI shows a banner. NEVER use for conclusions.
+"""Create SYNTHETIC demo data (+ demo inventory) so the app can be used without downloading anything.
 
-    python -m scripts.make_synthetic
+    python -m scripts.make_synthetic            # data only
+    python -m scripts.make_synthetic --train    # data + train all supported horizons
 """
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
-
-from src.data.loaders import save_processed  # noqa: E402
-from src.data.preprocessing import clean_canonical  # noqa: E402
-from synthetic import make_raw  # noqa: E402
+from src.demo import build_demo
 
 
 def main() -> int:
-    clean, rep = clean_canonical(make_raw(n_stores=5, n_products=12, days=120, seed=1))
-    save_processed(clean, {"dataset": "SYNTHETIC smoke-test data", "synthetic": True, "sampling": "n/a (generated)",
-                           "source_file": "tests/synthetic.py", "cleaning": rep})
-    print(f"Wrote synthetic data: {rep['rows_out']:,} rows, {rep['series']} series. Now run: python -m scripts.train")
+    out = build_demo(train="--train" in sys.argv, progress=lambda m, f: print(f"[{f:4.0%}] {m}"))
+    print(f"Wrote synthetic data: {out['rows']:,} rows, {out['series']} series.")
+    if "--train" not in sys.argv:
+        print("Now run: python -m scripts.train")
     return 0
 
 

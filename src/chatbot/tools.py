@@ -73,7 +73,7 @@ def _validate(params: dict, spec: dict) -> dict:
 
 def _guard(ctx: AppContext, tool: str, need_model: bool = True):
     if not ctx.has_data:
-        return _fail(tool, "No dataset is loaded. Add data in Settings & Data Management first.")
+        return _fail(tool, "No dataset is loaded. Add data in Settings & Data first.")
     if need_model and not ctx.forecasts:
         return _fail(tool, "No trained forecasting model is available. Run `python -m scripts.train` or train from Settings.")
     return None
@@ -207,7 +207,7 @@ def get_waste_risk(ctx, **params):
                                    "The dataset contains no expiry or spoilage records."]
     return _result("get_waste_risk", s, "proxy", "Demand history + forecast + supplied inventory (if any)",
                    tables={"Highest potential waste risk": _fmt(w, ["store_id", "product_id", "waste_risk_score", "waste_risk_level", "main_driver", "risk_basis", "recommended_action"], p["top_n"])},
-                   limitations=lim, page="Food Waste Intelligence", units="score 0-100")
+                   limitations=lim, page="Waste Risk Intelligence", units="score 0-100")
 
 
 def get_stockout_alerts(ctx, **params):

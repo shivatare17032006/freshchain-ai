@@ -1,0 +1,7 @@
+.venv*
+.git
+__pycache__
+data/raw
+*.txt
+!requirements.txt
+.env

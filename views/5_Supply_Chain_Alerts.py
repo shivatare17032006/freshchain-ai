@@ -7,7 +7,7 @@ from src.ui.state import cached_alerts, init_page, series_filter
 ctx, flt = init_page("Supply Chain Alerts", "🚨", "Rule-based alerts with recommended actions")
 H = flt["horizon"]
 al = cached_alerts(ctx, ctx.fingerprint, H)
-theme.banner("Alerts are shown in this app only; no email/SMS delivery is implemented. Thresholds are configurable in Settings & Data Management.")
+theme.banner("Alerts are shown in this app only; no email/SMS delivery is implemented. Thresholds are configurable in Settings & Data.")
 if al.empty:
     theme.empty_state("No alerts triggered for the current data and thresholds.")
     st.stop()

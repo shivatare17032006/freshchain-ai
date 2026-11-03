@@ -9,15 +9,11 @@ from src.data.loaders import read_upload, save_processed
 from src.data.preprocessing import clean_canonical
 from src.data.validation import UploadError, validate_canonical
 from src.ui import theme
-from src.ui.state import get_context
+from src.ui.state import demo_button, get_context
 
-try:
-    st.set_page_config(page_title="Settings · FreshChain AI", page_icon="⚙️", layout="wide")
-except Exception:
-    pass
 theme.inject_css()
 ctx = get_context()
-theme.page_header("⚙️ Settings & Data Management", "Datasets, parameters, model training and system status")
+theme.page_header("Settings & Data", "Datasets, planning parameters, model training and the Copilot connection", eyebrow="System")
 t1, t2, t3, t4, t5 = st.tabs(["Dataset", "Parameters", "Train models", "Copilot / LLM", "Run log"])
 
 with t1:
@@ -25,7 +21,10 @@ with t1:
         st.success(f"Active dataset: **{ctx.meta.get('dataset', 'unknown')}** · {len(ctx.history):,} rows · {ctx.history['date'].min().date()} → {ctx.history['date'].max().date()}"
                    + (" · SYNTHETIC" if ctx.is_synthetic else ""))
     else:
-        st.info("No dataset loaded. Upload a file below or follow DATASET_GUIDE.md.")
+        theme.empty_state("No dataset loaded", "Load the demo workspace, upload a file below, or follow DATASET_GUIDE.md for the real dataset.")
+    with st.expander("Demo workspace (synthetic data)", expanded=not ctx.has_data):
+        st.caption("Generates 6 stores x 24 products x 180 days of clearly-labelled SYNTHETIC retail data, an illustrative inventory snapshot, and trains the 7/14/28-day models. Replaces the active dataset.")
+        demo_button("settings_demo", "Build demo workspace")
     st.markdown("**Upload a demand file (CSV or Parquet)**  - validated, previewed and mapped before it replaces the active dataset. The previous dataset stays active if anything fails.")
     up = st.file_uploader("Demand file", type=["csv", "parquet"], key="hist_up")
     if up is not None:
@@ -121,9 +120,41 @@ with t3:
                     st.code(traceback.format_exc())
 
 with t4:
+    import os
+    from src.chatbot.agent import AgentError, Provider
     llm = config.llm_settings()
-    st.write({"LLM provider": llm.provider, "API key configured": bool(llm.api_key), "Model": llm.model or "(not set)", "Base URL": llm.base_url if llm.enabled else "(not used)", "Timeout (s)": llm.timeout})
-    st.caption("Keys are read from environment variables / .env only and are never displayed or stored. Without a key the Copilot runs in deterministic analytics mode; with one, the LLM only rewords answers that were computed by the app, and its output is rejected if it contains numbers the app did not compute.")
+    st.markdown("**Language-model connection** (optional)")
+    st.caption("With a model connected the Copilot answers free-form questions by calling the app's validated tools. Without one it uses deterministic rules. "
+               "The key lives only in this server process unless you choose to save it to the git-ignored .env file.")
+    provs = {"none": "None (deterministic)", "anthropic": "Anthropic (Claude)", "openai_compatible": "OpenAI-compatible (OpenAI, Ollama, LM Studio, ...)"}
+    with st.form("llm_form"):
+        c = st.columns(2)
+        prov = c[0].selectbox("Provider", list(provs), index=list(provs).index(llm.provider) if llm.provider in provs else 0, format_func=lambda k: provs[k])
+        model = c[1].text_input("Model", value=llm.model, placeholder="claude-sonnet-5-5 / gpt-4o-mini / llama3.1")
+        c = st.columns(2)
+        key = c[0].text_input("API key", type="password", placeholder="configured" if llm.api_key else "paste key (not shown again)")
+        base = c[1].text_input("Base URL", value=llm.base_url, help="Anthropic: https://api.anthropic.com. OpenAI: https://api.openai.com/v1. Ollama: http://localhost:11434/v1")
+        persist = st.checkbox("Also save to local .env (plain text, git-ignored)")
+        go = st.form_submit_button("Apply & test connection", type="primary")
+    if go:
+        os.environ["LLM_PROVIDER"], os.environ["LLM_MODEL"], os.environ["LLM_BASE_URL"] = prov, model.strip(), base.strip()
+        if key.strip():
+            os.environ["LLM_API_KEY"] = key.strip()
+        new = config.llm_settings()
+        if persist:
+            envp = config.ROOT / ".env"
+            lines = [l for l in (envp.read_text(encoding="utf-8").splitlines() if envp.exists() else []) if not l.split("=", 1)[0].strip().startswith("LLM_")]
+            lines += [f"LLM_PROVIDER={new.provider}", f"LLM_MODEL={new.model}", f"LLM_BASE_URL={new.base_url}", f"LLM_API_KEY={new.api_key}"]
+            envp.write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+        if not new.enabled:
+            st.warning("Saved. The Copilot stays in deterministic mode until a provider and key are set.")
+        else:
+            try:
+                st.success(Provider(new).ping())
+            except AgentError as e:
+                st.error(f"Saved, but the connection test failed: {e}")
+    llm = config.llm_settings()
+    st.caption(f"Active: provider **{llm.provider}** · model **{llm.model or 'not set'}** · key **{'set' if llm.api_key else 'not set'}** · Copilot mode **{'LLM agent' if llm.enabled else 'deterministic'}**")
 
 with t5:
     runs = ctx.repo.recent_runs(30)

@@ -1,17 +1,23 @@
 # Core scientific stack
-pandas==2.2.2
-numpy==1.26.4
-scikit-learn==1.5.0
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
 
-# Heavy optional stack (latest that support Python 3.11)
-lightgbm==4.5.0
-xgboost==2.0.3
-polars==1.2.0
-pyarrow==16.0.0
-shap==0.46.0
-streamlit==1.38.0
-plotly==5.23.0
+# Forecasting / data
+lightgbm>=4.5
+polars>=1.2
+pyarrow>=16.0
 
-# Misc utilities
-joblib==1.4.2
-tqdm==4.66.5
+# App
+streamlit>=1.38
+plotly>=5.23
+requests>=2.31
+
+# Misc
+joblib>=1.4
+tqdm>=4.66
+
+# Optional (uncomment to enable): XGBoost comparison, SHAP explanations
+# xgboost>=2.0
+# shap>=0.46
+# pytest>=8

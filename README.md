@@ -6,44 +6,34 @@ A retail decision-support app: real forecasting pipeline → leakage-safe evalua
 potential-waste-risk scoring → alerts, scenarios, exports and a grounded AI Copilot.
 
 ---
-## ⚠️ Verification status (please read)
-This code was written in a sandbox with **no network and without Polars, LightGBM, XGBoost, SHAP, Streamlit, Plotly, pyarrow or pytest installed**.
-What was actually run there:
-
-| Check | Result |
-|---|---|
-| Full test suite (82 tests, via a minimal pytest stand-in; Parquet I/O replaced by pickle in the harness) | **82 passed, 0 failed** |
-| End-to-end pipeline on **synthetic** data (clean → features → train → hold-out → backtest → forecast → inventory → alerts → copilot), scikit-learn fallback backend | ran, all three horizons (7/14/28) |
-| Every page + `app.py` executed against a **stub** Streamlit/Plotly (catches NameErrors/bad columns/signatures; empty-data, no-model and no-inventory states too) | all ran |
-| Copilot on 17 representative questions incl. follow-ups, clarification, no-key mode, LLM failure/invented-number rejection | worked |
-
-**Not verified (you must check):** `pip install -r requirements.txt` resolves; real LightGBM/XGBoost/SHAP paths; the Polars lazy-scan path;
-real Parquet I/O with pyarrow; real Streamlit/Plotly rendering (layout, widget behaviour, responsiveness, CSS); the Hugging Face download URL;
-the FreshRetailNet-50K column names (see `DATASET_GUIDE.md`); any performance on the real data. **No accuracy numbers are claimed.**
-Run `pytest` yourself first; if something differs from the above, that is a bug to fix, not a documented behaviour.
-
----
 ## Quick start
 ```bash
-python -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate        # Windows: .venv/Scripts/activate
 pip install -r requirements.txt
-pytest                                                    # run the tests first
-
-# A) 2-minute smoke test with clearly-labelled SYNTHETIC data (no download)
-python -m scripts.make_synthetic
-python -m scripts.train --horizons 7 14 28 --folds 3
-streamlit run app.py
-
-# B) Real data (FreshRetailNet-50K) - see DATASET_GUIDE.md
-python -m scripts.download_dataset --split train
-python -m scripts.inspect_dataset data/raw/freshretailnet_train.parquet     # confirm the real schema first!
-python -m scripts.prepare_data --raw data/raw/freshretailnet_train.parquet --max-series 2000   # dev sample (seeded)
-# python -m scripts.prepare_data --raw ... --full                                              # all series (needs RAM)
-python -m scripts.train --horizons 7 14 28 --folds 3 [--backend lightgbm] [--xgboost]
-streamlit run app.py
+streamlit run app.py          # then press "Load demo workspace" on the Home page (synthetic data + trained models, ~1 min)
 ```
-Training is **never** triggered by page interaction; run the script or use *Settings & Data Management → Train models*.
-Memory/runtime: the dev sample is for laptops; the full dataset needs substantially more RAM (feature frames hold ~25 columns × rows) and minutes–hours per horizon. Start small, measure, scale.
+Or from the terminal: `python -m scripts.make_synthetic --train`.  Tests: `pytest` (88 tests, all passing on Python 3.13 / pandas 3 / Streamlit 1.58).
+
+**Real data (FreshRetailNet-50K)** - see `DATASET_GUIDE.md`:
+```bash
+python -m scripts.download_dataset --split train
+python -m scripts.inspect_dataset data/raw/freshretailnet_train.parquet     # confirm the schema first
+python -m scripts.prepare_data --raw data/raw/freshretailnet_train.parquet --max-series 2000
+python -m scripts.train --horizons 7 14 28 --folds 3
+```
+**Docker:** `docker build -t freshchain . && docker run -p 8501:8501 freshchain`.
+
+## AI Copilot (LLM tool-calling)
+Connect a model in *Settings & Data -> Copilot / LLM* (Anthropic, or any OpenAI-compatible endpoint incl. local Ollama) or via `.env` (see `.env.example`).
+* The model chooses among 11 validated tools (`src/chatbot/agent.py`); tool parameters are type/range checked, unknown tools are rejected, no code/SQL/file access exists.
+* Every figure in the final answer must appear in the tool results. Otherwise the model is asked once to correct itself; if it still fails, the deterministic answer is shown with a notice.
+* Conversation memory (last 12 messages), tables/charts/limitations attached to each answer, follow-up suggestions.
+* With no key the Copilot runs in deterministic mode (rule-based router over the same tools).
+* Verified against mock OpenAI-compatible and Anthropic endpoints (`tests/test_agent.py` + manual run); **not yet exercised against a live provider** - connect one and use "Apply & test connection".
+
+## Status and caveats
+Verified here: full test suite, end-to-end pipeline on synthetic data (LightGBM backend), every view rendered in a real Streamlit server, landing page and Copilot interaction in a browser.
+Not verified: real FreshRetailNet-50K run (column names per `DATASET_GUIDE.md`), XGBoost/SHAP paths (optional packages not installed in the dev environment), live LLM provider, mobile layout. Demo numbers are **synthetic** and say nothing about real-world accuracy.
 
 ## Implemented vs optional vs future
 | Implemented | Optional (needs setup) | Future / not implemented |
@@ -72,7 +62,7 @@ raw file ──Polars lazy scan/project/sample──▶ DatasetAdapter ──▶
         ▼
   AppContext ─▶ services (policy table, waste table, alerts) ─▶ Streamlit pages  /  Copilot tools
 ```
-`src/` layers: `data` (ingest/validate/clean) · `features` · `forecasting` · `inventory` · `waste` · `alerts` · `analytics` (metrics, aggregations, context, services, explanations) · `chatbot` · `reporting` · `storage` (SQLite) · `ui` (Streamlit glue + Plotly charts). Business logic never imports Streamlit (only `src/ui` and `pages/` do), which is why it is unit-testable.
+`src/` layers: `data` (ingest/validate/clean) · `features` · `forecasting` · `inventory` · `waste` · `alerts` · `analytics` (metrics, aggregations, context, services, explanations) · `chatbot` · `reporting` · `storage` (SQLite) · `ui` (Streamlit glue + Plotly charts). Business logic never imports Streamlit (only `src/ui` and `views/` do), which is why it is unit-testable.
 
 ## Forecasting & leakage prevention (interview notes)
 * **Direct multi-horizon strategy**: a model for horizon *H* uses only features computed from data at or before *t − H* (lags `H, H+1, H+7`; rolling mean/std of demand shifted by *H*). A forecast made at origin *T* for *T+1…T+H* therefore uses information available at *T*. `tests/test_features.py` proves this by corrupting all demand after a cutoff and asserting that earlier feature rows are unchanged.
@@ -99,13 +89,6 @@ Assumptions shown in the UI: normal errors, independent daily errors (likely und
 ## Potential Waste Risk Score (proxy — not measured waste)
 Weighted 0–100 score from: days of cover vs shelf life (or a 14-day reference), recent 7-day demand decline vs prior 21 days, demand variability (CV), optional perishability flag. Weights renormalise over available components; without stock data the score is labelled *demand-pattern proxy only*. High ≥ 60, Medium ≥ 30. The UI never calls this observed waste and makes **no waste-reduction claim**.
 
-## AI Copilot
-`chat UI (pages/8)` → `intent_router` (rules + entity extraction + follow-up context) → `tools` (10 validated functions: `get_demand_forecast`, `get_inventory_recommendations`, `get_waste_risk`, `get_stockout_alerts`, `compare_forecast_models`, `get_product_performance`, `run_inventory_scenario`, `explain_forecast`, `get_dataset_summary`, `get_promotion_effect`) → services → formatter → *optional* LLM rewording.
-* Works **without any key** (deterministic mode). Tool parameters are type/range checked; unknown tools/params are rejected; no code, SQL, shell or file access is exposed to users or the model.
-* Optional LLM: set `LLM_PROVIDER=openai_compatible`, `LLM_API_KEY`, `LLM_MODEL` (and `LLM_BASE_URL`) in `.env`. The model only *rewords* text computed by the app; output containing numbers not present in the grounded text is **rejected** and the deterministic answer is shown. Timeouts, 429s, 5xx, malformed JSON all fall back gracefully.
-* Every answer carries a type label (Observed / Model forecast / Calculated / Hypothetical scenario / Proxy estimate), provenance, limitations and the page to open. Ambiguity → clarifying question (e.g. product needed; store needed when a product exists in several stores).
-* Router limits: identifiers must contain a digit (e.g. `store 3`, `product P12`) or be quoted (`product 'apple'`); this is rule-based, not a trained NLU model.
-
 ## Data dictionary (canonical table)
 | column | meaning |
 |---|---|
@@ -121,7 +104,7 @@ Weighted 0–100 score from: days of cover vs shelf life (or a 14-day reference)
 Artifacts (`artifacts/`): `model_h{H}.joblib` (trusted local pickles — don't load files from others), `forecast_h{H}.parquet`, `test_predictions_h{H}.parquet`, `backtest_folds_h{H}.parquet`, `importance_h{H}.parquet`, `run_summary.json`.
 
 ## Pages
-Executive Overview · Demand Forecasting · Inventory Optimization · Food Waste Intelligence · Supply Chain Alerts · Store & Product Analytics · Scenario Simulator · AI Supply Chain Copilot · Model Performance · Data Explorer · Settings & Data Management. Global filters (date, family, store, product, horizon) live in the shared sidebar; unsupported horizons are marked "(no model)". Exports: forecasts, recommendations, waste risk, alerts, scenarios (CSV, formula-injection-safe) and a PDF executive summary.
+Home (landing) · Executive Overview · Demand Forecasting · Inventory Optimization · Waste Risk Intelligence · Supply Chain Alerts · Store & Product Analytics · Scenario Simulator · AI Copilot · Model Performance · Data Explorer · Settings & Data. Global filters (date, family, store, product, horizon) live in the shared sidebar; unsupported horizons are marked "(no model)". Exports: forecasts, recommendations, waste risk, alerts, scenarios (CSV, formula-injection-safe) and a PDF executive summary.
 
 ## Tests
 `pytest` (82 tests): validation & upload rejection, adapters, cleaning rules, lag/leakage, chronological splits, forecast shape/non-negativity, metric edge cases, inventory formulas & constraints, waste scoring, router/tool validation, LLM failure & grounding, CSV/PDF export, alerts, SQLite. Fixtures use `tests/synthetic.py` (**synthetic, test-only**). Results above are from the authoring sandbox; yours may differ — fix or report differences.

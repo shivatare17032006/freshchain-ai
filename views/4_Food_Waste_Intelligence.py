@@ -4,7 +4,7 @@ from src.reporting.csv_export import to_csv_bytes
 from src.ui import charts, theme
 from src.ui.state import cached_waste, horizon_notice, init_page, series_filter
 
-ctx, flt = init_page("Food Waste Intelligence", "🥬", "Potential waste RISK (proxy) - not measured waste", need_model=True)
+ctx, flt = init_page("Waste Risk Intelligence", "🥬", "Potential waste RISK (proxy) - not measured waste", need_model=True)
 H = flt["horizon"]
 w, info = cached_waste(ctx, ctx.fingerprint, H)
 horizon_notice(info)

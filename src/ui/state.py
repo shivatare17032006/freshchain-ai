@@ -48,7 +48,8 @@ def render_filters(ctx: AppContext) -> dict:
     """Global filters rendered ONCE in the entrypoint sidebar; every page reads them from session_state."""
     h = ctx.history
     dmin, dmax = h["date"].min().date(), h["date"].max().date()
-    sb = st.sidebar
+    box = st.sidebar.container(key="filters")
+    sb = box
     sb.markdown("### Filters")
     dr = sb.date_input("Date range", value=(dmin, dmax), min_value=dmin, max_value=dmax, key="flt_dates",
                        help="Applies to historical (observed) charts and KPIs. Forecasts always start after the last observed day.")
@@ -72,23 +73,18 @@ def get_filters() -> dict:
     return st.session_state.get("_flt") or {"date_range": None, "categories": [], "stores": [], "products": [], "horizon": 7}
 
 
-def init_page(title: str, icon: str, subtitle: str = "", need_model: bool = False):
+def init_page(title: str, icon: str, subtitle: str = "", need_model: bool = False, eyebrow: str = ""):
     """Common bootstrap for every page. Returns (ctx, filters). Stops with a friendly empty state if no data."""
-    try:
-        st.set_page_config(page_title=f"{title} · FreshChain AI", page_icon=icon, layout="wide")
-    except Exception:
-        pass  # already set by the entrypoint
     theme.inject_css()
     ctx = get_context()
-    theme.page_header(f"{icon} {title}", subtitle)
+    theme.page_header(title, subtitle, eyebrow=eyebrow or "FreshChain / " + title)
     if not ctx.has_data:
-        theme.empty_state("No dataset is loaded yet.",
-                          "Follow DATASET_GUIDE.md (download → `python -m scripts.prepare_data`), or open **Settings & Data Management** to upload a CSV/Parquet file. "
-                          "For a quick smoke test with clearly-labelled synthetic data run `python -m scripts.make_synthetic`.")
+        theme.empty_state("No dataset loaded", "Load the demo workspace below, upload your own file in Settings & Data, or follow DATASET_GUIDE.md for the real dataset.")
+        demo_button("page_demo")
         st.stop()
 
     if need_model and not ctx.forecasts:
-        theme.empty_state("No trained forecasting model found.", "Run `python -m scripts.train` or train from **Settings & Data Management**.")
+        theme.empty_state("No trained forecasting model", "Train from Settings & Data, or run python -m scripts.train.")
         st.stop()
     return ctx, get_filters()
 
@@ -105,3 +101,18 @@ def series_filter(df: pd.DataFrame, flt: dict) -> pd.DataFrame:
 def horizon_notice(info: dict) -> None:
     if info.get("message"):
         theme.banner(info["message"])
+
+
+def demo_button(key: str, label: str = "Load demo workspace (synthetic data + train models)") -> None:
+    """Builds the labelled SYNTHETIC demo dataset, a demo inventory snapshot and trains all supported horizons."""
+    if st.button(label, key=key, type="primary"):
+        from src.demo import build_demo
+        bar = st.progress(0.0, "Starting…")
+        try:
+            build_demo(repo=None, progress=lambda m, f: bar.progress(min(max(f, 0.0), 1.0), m))
+        except Exception as e:  # surfaced, never swallowed
+            st.error(f"Demo build failed: {e}")
+            return
+        st.cache_resource.clear()
+        st.cache_data.clear()
+        st.rerun()

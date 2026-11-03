@@ -47,7 +47,7 @@ def load_raw_canonical(path: str | Path, adapter: DatasetAdapter, max_series: in
                 lf = lf.filter(dt <= date_to)
             info["date_filter"] = [date_from, date_to]
         if max_series:
-            keys = lf.select([scol, pcol]).unique().collect()
+            keys = lf.select([scol, pcol]).unique().collect().sort([scol, pcol])
             total = keys.height
             if total > max_series:
                 keys = keys.sample(n=max_series, seed=seed)

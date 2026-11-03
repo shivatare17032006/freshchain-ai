@@ -109,6 +109,11 @@ HELP_TEXT = ("I can answer questions using validated analytics over the loaded d
              "- Summarize the latest model evaluation\n- Explain MAE, RMSE, WAPE and forecast bias")
 
 
+TOOL_TO_FOLLOWUP = {"get_demand_forecast": "forecast", "get_inventory_recommendations": "inventory", "get_waste_risk": "waste", "get_stockout_alerts": "stockout",
+                    "compare_forecast_models": "compare_accuracy", "get_product_performance": "top_products", "run_inventory_scenario": "scenario",
+                    "explain_forecast": "explain_forecast", "explain_reorder_point": "explain_reorder", "get_dataset_summary": "dataset"}
+
+
 @dataclass
 class Reply:
     text: str
@@ -132,13 +137,57 @@ class FreshChainAssistant:
         self.llm = llm if llm is not None else LLMClient()
         self.state = ConversationState()
         self.history: list[dict] = []
+        self.agent_history: list[dict] = []   # plain user/assistant turns kept for the LLM agent
 
     def reset(self) -> None:
         self.state = ConversationState()
         self.history = []
+        self.agent_history = []
+
+    @property
+    def agent_enabled(self) -> bool:
+        return self.llm.enabled and self.llm.s.provider in ("openai_compatible", "anthropic")
+
+    def _respond_agent(self, message: str) -> Reply:
+        from src.chatbot import agent
+        out = agent.answer(self.ctx, agent.Provider(self.llm.s), self.agent_history[-12:], message)
+        ok = [r for r in out["results"] if r["ok"]]
+        reply = Reply(text=out["text"], mode="llm_agent", tool=", ".join(dict.fromkeys(out["tools"])) or None, intent="agent")
+        if ok:
+            reply.kind_label = " + ".join(dict.fromkeys(r["kind_label"] for r in ok))
+            reply.provenance = "; ".join(dict.fromkeys(r["provenance"] for r in ok))
+            reply.page = ok[0]["page"]
+            reply.chart = next((r["chart"] for r in ok if r.get("chart")), None)
+            for r in ok[:3]:
+                reply.tables.update({k: v for k, v in r["tables"].items() if k not in reply.tables})
+            reply.limitations = list(dict.fromkeys(l for r in ok for l in r["limitations"]))
+            reply.followups = FOLLOWUPS.get(TOOL_TO_FOLLOWUP.get(ok[0]["tool"], ""), [])
+        self.agent_history += [{"role": "user", "content": message}, {"role": "assistant", "content": out["text"]}]
+        return reply
 
     # ------------------------------------------------------------------------------------------
+    def _resolve_ids(self, e: dict) -> dict:
+        """Map loose ids ('3', 'p12') onto the dataset's real ids ('S03', 'P012') when the match is unambiguous."""
+        h = self.ctx.history if self.ctx.has_data else None
+        if h is None:
+            return e
+        out = dict(e)
+        for key, col in (("store_id", "store_id"), ("product_id", "product_id")):
+            v = out.get(key)
+            if not v:
+                continue
+            known = h[col].astype(str).unique()
+            if v in known:
+                continue
+            digits = re.sub(r"\D", "", str(v))
+            if digits:
+                hits = [k for k in known if re.sub(r"\D", "", k) and int(re.sub(r"\D", "", k)) == int(digits)]
+                if len(hits) == 1:
+                    out[key] = hits[0]
+        return out
+
     def _run(self, intent: str, e: dict):
+        e = self._resolve_ids(e)
         h = e.get("horizon", 7)
         common = {k: e[k] for k in ("store_id", "product_id", "category") if k in e}
         if intent == "forecast":
@@ -220,7 +269,18 @@ class FreshChainAssistant:
         routed = route(message, self.state)
         intent, ent = routed.intent, routed.entities
         self.history.append({"role": "user", "content": message})
-        reply = self._dispatch(message, routed)
+        reply = None
+        if self.agent_enabled:
+            try:
+                reply = self._respond_agent(message)
+            except Exception as exc:  # provider/grounding problems never break the chat
+                note = str(exc) if isinstance(exc, RuntimeError) else "unexpected error"
+                reply = None
+                agent_note = f"(Language-model agent unavailable: {note}. Showing the deterministic answer.)"
+        if reply is None:
+            reply = self._dispatch(message, routed)
+            if self.agent_enabled:
+                reply.notice = (reply.notice + " " + agent_note).strip()
         reply.intent = intent
         if not reply.clarification and intent not in ("unknown", "help", "greeting"):
             self.state.last_intent = intent

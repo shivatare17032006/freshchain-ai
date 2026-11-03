@@ -22,7 +22,7 @@ def horizon_info(ctx: AppContext, requested: int) -> dict:
     if serving is None:
         info["message"] = (f"No trained model covers a {requested}-day horizon. "
                            + (f"History has {info['available_days']} days but ~{info['required_days']} are needed for a reliable {requested}-day model."
-                              if info["history_supported"] is False else "Train models from Settings & Data Management."))
+                              if info["history_supported"] is False else "Train models from Settings & Data."))
     elif serving != requested:
         info["message"] = f"Showing the first {requested} days of the {serving}-day model."
     return info
